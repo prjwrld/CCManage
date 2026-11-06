@@ -23,6 +23,8 @@ let claudeAppPath = "/Applications/Claude.app"
 let appRepoURL = URL(string: "https://github.com/prjwrld/accounts-for-claude")!
 /// The command-line tool this app drives (by Emin Budak, MIT).
 let cliRepoURL = URL(string: "https://github.com/EminBudak/claude-multi-account#quick-start")!
+/// UserDefaults key: true once "Don't ask again" was ticked on the Quit question.
+let skipQuitConfirmKey = "skipQuitConfirmation"
 
 /// claude-multi lives in ~/.local/bin, which a Finder-launched app does not
 /// have on its PATH, so look in the usual places explicitly.
@@ -317,6 +319,7 @@ func usageTint(_ percent: Int) -> Color {
 struct PopoverView: View {
     @ObservedObject var store: Store
     let act: Actions
+    @AppStorage(skipQuitConfirmKey) private var skipQuitConfirm = false
 
     private var accounts: [Profile] { store.profiles.filter { !$0.isMain } }
     private var main: Profile? { store.profiles.first(where: \.isMain) }
@@ -406,6 +409,8 @@ struct PopoverView: View {
                 Button("Run Doctor…", action: act.doctor).disabled(busy)
                 Button("Open Sync Log", action: act.showSyncLog)
                 Toggle("Open at Login", isOn: Binding(get: { store.openAtLogin }, set: { _ in act.toggleLogin() }))
+                Toggle("Ask Before Quitting an Account",
+                       isOn: Binding(get: { !skipQuitConfirm }, set: { skipQuitConfirm = !$0 }))
                 Divider()
                 Button("About Accounts for Claude") { NSWorkspace.shared.open(appRepoURL) }
                 Button("Quit Accounts for Claude", action: act.quitApp)
@@ -811,9 +816,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard let profile = loadProfiles().first(where: { $0.name == name }), let app = profile.app else { return }
         let which = profile.viaMainApp || profile.isMain
             ? "the plain Claude app (\(profile.account ?? "Claude"))" : profile.title
-        guard confirm("Quit \(which)?",
-                      "Its Claude window closes, and any Claude Code session running in it stops.",
-                      button: "Quit") else { return }
+        if !UserDefaults.standard.bool(forKey: skipQuitConfirmKey) {
+            let answer = confirm("Quit \(which)?",
+                                 "Its Claude window closes, and any Claude Code session running in it stops.",
+                                 button: "Quit", offerDontAskAgain: true)
+            guard answer.confirmed else { return }
+            if answer.dontAskAgain { UserDefaults.standard.set(true, forKey: skipQuitConfirmKey) }
+        }
         runInBackground("Quitting…") {
             app.terminate()
             for _ in 0..<40 {
@@ -1004,6 +1013,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func confirm(_ title: String, _ message: String, button: String) -> Bool {
+        confirm(title, message, button: button, offerDontAskAgain: false).confirmed
+    }
+
+    /// With offerDontAskAgain, the alert gets macOS's standard suppression
+    /// checkbox; dontAskAgain is only true when it was ticked AND confirmed.
+    private func confirm(_ title: String, _ message: String, button: String,
+                         offerDontAskAgain: Bool) -> (confirmed: Bool, dontAskAgain: Bool) {
         NSApp.activate()
         let alert = NSAlert()
         alert.messageText = title
@@ -1011,7 +1027,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         alert.alertStyle = .warning
         alert.addButton(withTitle: button)
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        if offerDontAskAgain {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Don't ask again"
+        }
+        let confirmed = alert.runModal() == .alertFirstButtonReturn
+        return (confirmed, confirmed && alert.suppressionButton?.state == .on)
     }
 
     /// An alert with scrollable, monospaced text (for doctor output and errors).
