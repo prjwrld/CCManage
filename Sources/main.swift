@@ -438,6 +438,7 @@ struct AccountRow: View {
                     if hovering && profile.isRunning && !profile.isMain && !profile.viaMainApp && !disabled {
                         IconButton(symbol: "arrow.clockwise", help: "Restart this account") { act.restart(profile.name) }
                     }
+                    WhereIcon(profile: profile)
                 }
                 .frame(height: 18)
                 details
@@ -558,6 +559,25 @@ struct Avatar: View {
                 .offset(x: 1, y: 1)
         }
         .help(running ? "Running" : "Stopped")
+    }
+}
+
+/// Where the account runs: a desktop for the plain Claude app, a cloud for its
+/// own profile window. Bright when that window is open, greyed out when not.
+struct WhereIcon: View {
+    let profile: Profile
+
+    private var inPlainApp: Bool { profile.isMain || profile.viaMainApp }
+
+    var body: some View {
+        Image(systemName: inPlainApp ? "display" : "cloud")
+            .font(.system(size: 12, weight: .medium))
+            // .primary is white in dark mode and black in light mode, so it
+            // stays visible in both; plain .white would vanish on a light popover.
+            .foregroundStyle(profile.isRunning ? AnyShapeStyle(.primary) : AnyShapeStyle(.quaternary))
+            .help(profile.isRunning
+                  ? (inPlainApp ? "Running in the plain Claude app" : "Running in its own window")
+                  : (inPlainApp ? "Plain Claude app · stopped" : "Own window · stopped"))
     }
 }
 
