@@ -279,13 +279,21 @@ final class Store: ObservableObject {
     @Published var syncTime: String?
     @Published var syncSessions: String?
     @Published var openAtLogin = false
+    /// Profiles we asked to open whose Claude window isn't running yet.
+    @Published var opening: Set<String> = []
 
-    func reload() {
+    /// Re-reads everything. Returns the profiles that were opening and are now
+    /// running, so the caller can react to "it's up".
+    @discardableResult
+    func reload() -> Set<String> {
         profiles = loadProfiles()
         let sync = lastSync()
         syncTime = sync?.time
         syncSessions = sync?.sessions
         openAtLogin = SMAppService.mainApp.status == .enabled
+        let started = opening.filter { name in profiles.contains { $0.name == name && $0.isRunning } }
+        opening.subtract(started)
+        return started
     }
 }
 
@@ -333,14 +341,16 @@ struct PopoverView: View {
             if cliPath == nil { setupNotice; Divider() }
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(accounts.enumerated()), id: \.element.name) { i, profile in
-                    AccountRow(profile: profile, index: i, name: shortName(profile.title, among: titles), disabled: busy, act: act)
+                    AccountRow(profile: profile, index: i, name: shortName(profile.title, among: titles),
+                               opening: store.opening.contains(profile.name), disabled: busy, act: act)
                 }
                 if let main {
                     Text("Default Claude app")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 2)
-                    AccountRow(profile: main, index: accounts.count, name: shortName(main.title, among: titles), disabled: busy, act: act)
+                    AccountRow(profile: main, index: accounts.count, name: shortName(main.title, among: titles),
+                               opening: store.opening.contains(main.name), disabled: busy, act: act)
                 }
             }
             .padding(6)
@@ -430,13 +440,18 @@ struct AccountRow: View {
     let profile: Profile
     let index: Int
     let name: String      // what the card shows; see shortName()
+    let opening: Bool     // asked to open, window not up yet
     let disabled: Bool
     let act: Actions
     @State private var hovering = false
 
+    /// Opening counts as "on" for colours, so the card lights up the moment
+    /// it's clicked instead of staying grey until the window appears.
+    private var lit: Bool { profile.isRunning || opening }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Avatar(text: profile.title, running: profile.isRunning, index: index)
+            Avatar(text: profile.title, running: profile.isRunning, starting: opening, index: index)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(name)
@@ -444,22 +459,28 @@ struct AccountRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
-                    if hovering && profile.isRunning && !profile.isMain && !profile.viaMainApp && !disabled {
-                        IconButton(symbol: "arrow.clockwise", help: "Restart this account") { act.restart(profile.name) }
+                    if opening {
+                        Text("Opening…").font(.system(size: 11)).foregroundStyle(.secondary)
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        if hovering && profile.isRunning && !profile.isMain && !profile.viaMainApp && !disabled {
+                            IconButton(symbol: "arrow.clockwise", help: "Restart this account") { act.restart(profile.name) }
+                        }
+                        WhereIcon(profile: profile)
                     }
-                    WhereIcon(profile: profile)
                 }
                 .frame(height: 18)
                 details
             }
             // A stopped account looks switched off: no colour, faded.
-            .opacity(profile.isRunning ? 1 : 0.45)
+            .opacity(lit ? 1 : 0.45)
+            .animation(.easeInOut(duration: 0.25), value: lit)
         }
         .padding(.horizontal, 8).padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.07 : 0)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture { if !disabled { act.open(profile.name) } }
+        .onTapGesture { if !disabled && !opening { act.open(profile.name) } }
         .help(profile.viaMainApp ? "Open in the default Claude app · click to bring it to the front"
               : profile.isRunning ? "Running · click to bring it to the front" : "Click to open")
         .contextMenu {
@@ -491,8 +512,8 @@ struct AccountRow: View {
             Text("Not signed in").font(.system(size: 11)).foregroundStyle(.secondary)
         } else if let usage = profile.usage {
             VStack(alignment: .leading, spacing: 4) {
-                UsageBar(label: "5-hour", percent: usage.fiveHour, resets: usage.fiveHourResets, active: profile.isRunning)
-                UsageBar(label: "Week", percent: usage.week, resets: usage.weekResets, active: profile.isRunning)
+                UsageBar(label: "5-hour", percent: usage.fiveHour, resets: usage.fiveHourResets, active: lit)
+                UsageBar(label: "Week", percent: usage.week, resets: usage.weekResets, active: lit)
                 if !usage.isLive {
                     // Only shown when live failed: say how old the number is, and why.
                     Text("Saved \(usage.updated.formatted(date: .omitted, time: .shortened))"
@@ -551,6 +572,7 @@ struct UsageBar: View {
 struct Avatar: View {
     let text: String
     let running: Bool
+    var starting = false    // opening: colour on, orange dot until the window is up
     let index: Int      // row position: the list is sorted, so each account keeps its colour
 
     /// Colour by position rather than by a hash of the address: with only a
@@ -562,21 +584,24 @@ struct Avatar: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Circle().fill(running ? color.opacity(0.85) : Color.gray.opacity(0.6))
+            let lit = running || starting
+            Circle().fill(lit ? color.opacity(0.85) : Color.gray.opacity(0.6))
                 .frame(width: 28, height: 28)
                 .overlay(Text(text.first.map { String($0).uppercased() } ?? "?")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white))
                 // Switched off with the rest of the card; the status dot below
                 // keeps its colour, so "stopped" still reads at a glance.
-                .opacity(running ? 1 : 0.5)
+                .opacity(lit ? 1 : 0.5)
             // Always shown, so a closed account reads as "stopped", not as "unknown".
-            Circle().fill(statusColor(running: running))
+            // Orange while it starts, so the click gets an answer straight away.
+            Circle().fill(starting && !running ? Color(nsColor: .systemOrange) : statusColor(running: running))
                 .frame(width: 10, height: 10)
                 .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
                 .offset(x: 1, y: 1)
         }
-        .help(running ? "Running" : "Stopped")
+        .animation(.easeInOut(duration: 0.25), value: lit(running, starting))
+        .help(running ? "Running" : starting ? "Opening…" : "Stopped")
     }
 }
 
@@ -609,6 +634,8 @@ func shortName(_ title: String, among titles: [String]) -> String {
     let clashes = titles.filter { $0.lowercased() != title.lowercased() && local($0).lowercased() == name.lowercased() }
     return clashes.isEmpty ? name : title
 }
+
+private func lit(_ running: Bool, _ starting: Bool) -> Bool { running || starting }
 
 /// Green for a Claude window that is open, red for one that is not.
 func statusColor(running: Bool) -> Color {
@@ -692,8 +719,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-                if app?.bundleIdentifier == claudeBundleID { self?.store.reload() }
+                if app?.bundleIdentifier == claudeBundleID { self?.reload() }
             }
+        }
+    }
+
+    /// store.reload(), plus: when the last account we were opening is now
+    /// running, close the popover a moment later, so the green dot is seen
+    /// and the new window is what's left on screen.
+    private func reload() {
+        let started = store.reload()
+        guard !started.isEmpty, store.opening.isEmpty, popover.isShown else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, self.store.opening.isEmpty else { return }
+            self.popover.performClose(nil)
+        }
+    }
+
+    /// Marks profiles as opening. Cleared when their window runs (reload), when
+    /// the open command fails, or after a minute if the window never appears.
+    private func markOpening(_ names: [String]) {
+        store.opening.formUnion(names)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+            self?.store.opening.subtract(names)
         }
     }
 
@@ -754,13 +802,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             { [weak self] name in self?.popover.performClose(nil); f(name) }
         }
         return Actions(
-            open: closing { [unowned self] in openProfile($0) },
+            // A running account comes to the front, so the popover gets out of
+            // the way; a stopped one stays in view to show it opening.
+            open: { [unowned self] name in
+                if loadProfiles().first(where: { $0.name == name })?.isRunning == true { popover.performClose(nil) }
+                openProfile(name)
+            },
             restart: closing { [unowned self] in runTool(["open", $0, "--restart"], busy: "Restarting…") },
             quit: closing { [unowned self] in quitProfile($0) },
             fixSignIn: closing { [unowned self] in fixSignIn($0) },
             remove: closing { [unowned self] in removeAccount($0) },
             addAccount: closing { [unowned self] in addAccount() },
-            openAll: closing { [unowned self] in openAll() },
+            openAll: { [unowned self] in openAll() },
             quitAll: closing { [unowned self] in quitAll() },
             sync: { [unowned self] in
                 retryKeychainAccess()   // a refused Keychain prompt is asked again only on purpose
@@ -786,7 +839,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             app.unhide()
             app.activate()
         } else if profile.isMain {
-            runInBackground("Opening Claude…") {
+            markOpening([name])
+            runInBackground("Opening Claude…", onFailure: { [weak self] in self?.store.opening.remove(name) }) {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
                 p.arguments = ["-n", "-a", claudeAppPath]
@@ -794,14 +848,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 return CommandResult(status: p.terminationStatus, output: "Could not open \(claudeAppPath).")
             }
         } else {
-            runTool(["open", name], busy: "Opening…")
+            markOpening([name])
+            runInBackground("Opening…", onFailure: { [weak self] in self?.store.opening.remove(name) }) {
+                runCLI(["open", name])
+            }
         }
     }
 
     private func openAll() {
         let stopped = loadProfiles().filter { !$0.isMain && !$0.isRunning }.map(\.name)
         guard !stopped.isEmpty else { return }
-        runInBackground("Opening \(stopped.count)…") {
+        markOpening(stopped)
+        runInBackground("Opening \(stopped.count)…",
+                        onFailure: { [weak self] in self?.store.opening.subtract(stopped) }) {
             for name in stopped {
                 let r = runCLI(["open", name])
                 if r.status != 0 { return r }
@@ -993,16 +1052,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// failures (or the output, when `showOutput` names a window title).
     private func runInBackground(_ label: String, showOutput: String? = nil,
                                  onSuccess: (() -> Void)? = nil,
+                                 onFailure: (() -> Void)? = nil,
                                  _ work: @escaping () -> CommandResult) {
         setBusy(label)
         DispatchQueue.global(qos: .userInitiated).async {
             let result = work()
             DispatchQueue.main.async {
                 self.setBusy(nil)
-                self.store.reload()
+                self.reload()
                 if let title = showOutput {
                     self.showText(title, result.output)
                 } else if result.status != 0 {
+                    onFailure?()
                     self.showText("\(label.replacingOccurrences(of: "…", with: "")) failed",
                                   result.output.isEmpty ? "Exit code \(result.status)" : result.output)
                 } else {
@@ -1111,6 +1172,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLi
                           demo("work@example.com", 8, 22, running: true),
                           demo("side-project@example.com", 0, 87, running: false)]
         store.syncTime = "18:06"
+        if CommandLine.arguments.contains("--opening") { store.opening = ["side-project@example.com"] }
     }
     let none: () -> Void = {}
     let noneName: (String) -> Void = { _ in }
