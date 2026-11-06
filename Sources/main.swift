@@ -343,6 +343,10 @@ struct PopoverView: View {
             footer
         }
         .frame(width: 330)
+        // A popover is see-through by default: over a white web page its dark
+        // mode text sat on light grey. A solid window colour keeps the contrast
+        // the same whatever is behind it, in light and dark mode.
+        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
     }
 
     private var header: some View {
@@ -609,6 +613,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Live usage refreshes only while someone is looking: on open, then every
     /// 30 s until the popover closes. Nothing polls claude.ai in the background.
     private var liveTimer: Timer?
+    /// Watches clicks in other apps while the popover is open (see showPopover).
+    private var outsideClickMonitor: Any?
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let popover = NSPopover()
     private let store = Store()
@@ -646,6 +652,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             store.reload()   // re-read on every open, so it never shows stale state
             NSApp.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // .transient only closes on outside clicks while this app is the
+            // active one, and macOS often keeps another app active when a menu
+            // bar item is clicked. A global monitor sees clicks in every other
+            // app (it never sees our own, so clicks inside the popover still
+            // work) and closes the popover on the first one.
+            if outsideClickMonitor == nil {
+                outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+                    matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+                ) { [weak self] _ in self?.popover.performClose(nil) }
+            }
             refreshLive()
             liveTimer?.invalidate()
             liveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -657,6 +673,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         liveTimer?.invalidate()
         liveTimer = nil
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = nil
     }
 
     private func refreshLive() {
