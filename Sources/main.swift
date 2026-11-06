@@ -438,6 +438,9 @@ struct AccountRow: View {
                     if hovering && profile.isRunning && !profile.isMain && !profile.viaMainApp && !disabled {
                         IconButton(symbol: "arrow.clockwise", help: "Restart this account") { act.restart(profile.name) }
                     }
+                    StatusPill(running: profile.isRunning,
+                               help: profile.viaMainApp ? "Open in the default Claude app"
+                                   : profile.isRunning ? "Its Claude window is open" : "Click the card to open it")
                 }
                 .frame(height: 18)
                 details
@@ -551,14 +554,38 @@ struct Avatar: View {
                 .overlay(Text(text.first.map { String($0).uppercased() } ?? "?")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white))
-            if running {
-                Circle().fill(Color.green)
-                    .frame(width: 9, height: 9)
-                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
-                    .offset(x: 1, y: 1)
-            }
+            // Always shown, so a closed account reads as "stopped", not as "unknown".
+            Circle().fill(statusColor(running: running))
+                .frame(width: 10, height: 10)
+                .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                .offset(x: 1, y: 1)
         }
-        .help(running ? "Running" : "Not running")
+        .help(running ? "Running" : "Stopped")
+    }
+}
+
+/// Green for a Claude window that is open, red for one that is not.
+func statusColor(running: Bool) -> Color {
+    Color(nsColor: running ? .systemGreen : .systemRed)
+}
+
+/// "● Running" / "● Stopped" at the right of a card's title row.
+struct StatusPill: View {
+    let running: Bool
+    var help = ""
+
+    var body: some View {
+        let color = statusColor(running: running)
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(running ? "Running" : "Stopped")
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(color)
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(Capsule().fill(color.opacity(0.15)))
+        .fixedSize()
+        .help(help)
     }
 }
 
