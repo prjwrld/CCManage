@@ -321,6 +321,7 @@ struct PopoverView: View {
     private var accounts: [Profile] { store.profiles.filter { !$0.isMain } }
     private var main: Profile? { store.profiles.first(where: \.isMain) }
     private var busy: Bool { store.busy != nil }
+    private var titles: [String] { store.profiles.map(\.title) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -329,14 +330,14 @@ struct PopoverView: View {
             if cliPath == nil { setupNotice; Divider() }
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(accounts.enumerated()), id: \.element.name) { i, profile in
-                    AccountRow(profile: profile, index: i, disabled: busy, act: act)
+                    AccountRow(profile: profile, index: i, name: shortName(profile.title, among: titles), disabled: busy, act: act)
                 }
                 if let main {
                     Text("Default Claude app")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8).padding(.top, 10).padding(.bottom, 2)
-                    AccountRow(profile: main, index: accounts.count, disabled: busy, act: act)
+                    AccountRow(profile: main, index: accounts.count, name: shortName(main.title, among: titles), disabled: busy, act: act)
                 }
             }
             .padding(6)
@@ -423,6 +424,7 @@ struct PopoverView: View {
 struct AccountRow: View {
     let profile: Profile
     let index: Int
+    let name: String      // what the card shows; see shortName()
     let disabled: Bool
     let act: Actions
     @State private var hovering = false
@@ -432,7 +434,8 @@ struct AccountRow: View {
             Avatar(text: profile.title, running: profile.isRunning, index: index)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Text(profile.title)
+                    Text(name)
+                        .help(profile.title)     // the full address on hover
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
@@ -589,6 +592,17 @@ struct WhereIcon: View {
                   ? (inPlainApp ? "Running in the plain Claude app" : "Running in its own window")
                   : (inPlainApp ? "Plain Claude app · stopped" : "Own window · stopped"))
     }
+}
+
+/// "peop@fixbyai.in" -> "peop". Keeps the whole address when another account
+/// in the list has the same name before the @ (you@work.com and you@home.com),
+/// so two cards never look identical.
+func shortName(_ title: String, among titles: [String]) -> String {
+    func local(_ s: String) -> String { s.split(separator: "@", maxSplits: 1).first.map(String.init) ?? s }
+    let name = local(title)
+    guard title.contains("@") else { return title }
+    let clashes = titles.filter { $0.lowercased() != title.lowercased() && local($0).lowercased() == name.lowercased() }
+    return clashes.isEmpty ? name : title
 }
 
 /// Green for a Claude window that is open, red for one that is not.
