@@ -463,8 +463,12 @@ struct AccountRow: View {
                         Text("Opening…").font(.system(size: 11)).foregroundStyle(.secondary)
                         ProgressView().controlSize(.mini)
                     } else {
-                        if hovering && profile.isRunning && !profile.isMain && !profile.viaMainApp && !disabled {
-                            IconButton(symbol: "arrow.clockwise", help: "Restart this account") { act.restart(profile.name) }
+                        if hovering && profile.isRunning && !disabled {
+                            // Restart needs the profile's own window; Quit works for the plain app too.
+                            if !profile.isMain && !profile.viaMainApp {
+                                IconButton(symbol: "arrow.clockwise", help: "Restart this account") { act.restart(profile.name) }
+                            }
+                            IconButton(symbol: "power", help: "Quit this account") { act.quit(profile.name) }
                         }
                         WhereIcon(profile: profile)
                     }
