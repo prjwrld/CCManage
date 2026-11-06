@@ -443,6 +443,8 @@ struct AccountRow: View {
                 .frame(height: 18)
                 details
             }
+            // A stopped account looks switched off: no colour, faded.
+            .opacity(profile.isRunning ? 1 : 0.45)
         }
         .padding(.horizontal, 8).padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.07 : 0)))
@@ -477,8 +479,8 @@ struct AccountRow: View {
             Text("Not signed in").font(.system(size: 11)).foregroundStyle(.secondary)
         } else if let usage = profile.usage {
             VStack(alignment: .leading, spacing: 4) {
-                UsageBar(label: "5-hour", percent: usage.fiveHour, resets: usage.fiveHourResets)
-                UsageBar(label: "Week", percent: usage.week, resets: usage.weekResets)
+                UsageBar(label: "5-hour", percent: usage.fiveHour, resets: usage.fiveHourResets, active: profile.isRunning)
+                UsageBar(label: "Week", percent: usage.week, resets: usage.weekResets, active: profile.isRunning)
                 if !usage.isLive {
                     // Only shown when live failed: say how old the number is, and why.
                     Text("Saved \(usage.updated.formatted(date: .omitted, time: .shortened))"
@@ -501,6 +503,7 @@ struct UsageBar: View {
     let label: String
     let percent: Int
     var resets: Date? = nil
+    var active = true       // false for a stopped account: grey fill
 
     private var resetsText: String {
         guard let resets else { return "\(label): \(percent)% used" }
@@ -519,7 +522,7 @@ struct UsageBar: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.1))
-                    Capsule().fill(usageTint(percent))
+                    Capsule().fill(active ? usageTint(percent) : Color.secondary)
                         .frame(width: max(4, geo.size.width * CGFloat(min(max(percent, 0), 100)) / 100))
                 }
             }
@@ -547,11 +550,14 @@ struct Avatar: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Circle().fill(color.opacity(0.85))
+            Circle().fill(running ? color.opacity(0.85) : Color.gray.opacity(0.6))
                 .frame(width: 28, height: 28)
                 .overlay(Text(text.first.map { String($0).uppercased() } ?? "?")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white))
+                // Switched off with the rest of the card; the status dot below
+                // keeps its colour, so "stopped" still reads at a glance.
+                .opacity(running ? 1 : 0.5)
             // Always shown, so a closed account reads as "stopped", not as "unknown".
             Circle().fill(statusColor(running: running))
                 .frame(width: 10, height: 10)
