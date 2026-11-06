@@ -10,7 +10,7 @@ macOS 14.4+ · Apple silicon and Intel · Swift / SwiftUI · MIT · **unofficial
 
 - **Every account in one place.** Each Claude Desktop profile is a card with a green dot when its window is open. Click a card to bring that window forward, or to open it.
 - **Live usage for all of them.** The 5-hour and weekly bars come straight from claude.ai, the same numbers as Claude's own usage panel, even for accounts whose window is closed. Hover over a bar to see when that limit resets.
-- **One-click actions.** Add an account, open all of them, quit all of them, restart or remove one (right-click a card), and sync Claude Code sessions between accounts.
+- **One-click actions.** Add an account, open all of them, quit all of them, and restart, quit or remove a single one (right-click its card), and sync Claude Code sessions between accounts.
 - **Stays out of the way.** It lives only in the menu bar and fetches usage only while the popover is open.
 
 ## Requirements

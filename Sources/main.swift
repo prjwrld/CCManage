@@ -291,6 +291,7 @@ final class Store: ObservableObject {
 struct Actions {
     let open: (String) -> Void
     let restart: (String) -> Void
+    let quit: (String) -> Void
     let fixSignIn: (String) -> Void
     let remove: (String) -> Void
     let addAccount: () -> Void
@@ -457,6 +458,9 @@ struct AccountRow: View {
             Button(profile.isRunning ? "Bring to Front" : "Open") { act.open(profile.name) }
             if !profile.isMain {
                 Button("Restart") { act.restart(profile.name) }.disabled(!profile.isRunning || profile.viaMainApp)
+            }
+            Button("Quit…") { act.quit(profile.name) }.disabled(!profile.isRunning)
+            if !profile.isMain {
                 Divider()
                 Button("Remove…") { act.remove(profile.name) }.disabled(profile.isRunning && !profile.viaMainApp)
             }
@@ -733,6 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return Actions(
             open: closing { [unowned self] in openProfile($0) },
             restart: closing { [unowned self] in runTool(["open", $0, "--restart"], busy: "Restarting…") },
+            quit: closing { [unowned self] in quitProfile($0) },
             fixSignIn: closing { [unowned self] in fixSignIn($0) },
             remove: closing { [unowned self] in removeAccount($0) },
             addAccount: closing { [unowned self] in addAccount() },
@@ -783,6 +788,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 if r.status != 0 { return r }
             }
             return CommandResult(status: 0, output: "")
+        }
+    }
+
+    /// Quits the one Claude window this row stands for. For a row folded from
+    /// the plain Claude app (viaMainApp), that is the plain app.
+    private func quitProfile(_ name: String) {
+        guard let profile = loadProfiles().first(where: { $0.name == name }), let app = profile.app else { return }
+        let which = profile.viaMainApp || profile.isMain
+            ? "the plain Claude app (\(profile.account ?? "Claude"))" : profile.title
+        guard confirm("Quit \(which)?",
+                      "Its Claude window closes, and any Claude Code session running in it stops.",
+                      button: "Quit") else { return }
+        runInBackground("Quitting…") {
+            app.terminate()
+            for _ in 0..<40 {
+                if app.isTerminated { return CommandResult(status: 0, output: "") }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            return CommandResult(status: 1, output: "\(which) did not quit within 20 seconds. It may be asking you something in its window.")
         }
     }
 
@@ -1055,7 +1079,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLi
     }
     let none: () -> Void = {}
     let noneName: (String) -> Void = { _ in }
-    let act = Actions(open: noneName, restart: noneName, fixSignIn: noneName, remove: noneName,
+    let act = Actions(open: noneName, restart: noneName, quit: noneName, fixSignIn: noneName, remove: noneName,
                       addAccount: none, openAll: none, quitAll: none, sync: none, showSyncLog: none,
                       doctor: none, toggleLogin: none, quitApp: none)
     let view = NSHostingView(rootView: PopoverView(store: store, act: act)
