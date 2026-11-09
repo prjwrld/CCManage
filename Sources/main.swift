@@ -50,6 +50,20 @@ struct Usage {
     /// Live numbers are refreshed every 30 s while the popover is open, so 3
     /// minutes means refreshing stopped working. Saved ones lag by design.
     var isStale: Bool { Date().timeIntervalSince(updated) > (isLive ? 3 * 60 : 10 * 60) }
+
+    /// A limit is used up: Claude won't answer on this account until it resets.
+    var isLocked: Bool { fiveHour >= 100 || week >= 100 }
+
+    /// When the account can be used again: the later reset of the limits that
+    /// are full, since both have to clear. nil when not locked, or when a full
+    /// limit's reset time isn't known (saved numbers don't carry one).
+    var unlocksAt: Date? {
+        var times: [Date?] = []
+        if fiveHour >= 100 { times.append(fiveHourResets) }
+        if week >= 100 { times.append(weekResets) }
+        guard !times.isEmpty, !times.contains(where: { $0 == nil }) else { return nil }
+        return times.compactMap { $0 }.max()
+    }
 }
 
 struct Profile {
@@ -318,10 +332,61 @@ struct Actions {
 
 let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
 
-/// Bar colour for a share of a limit that is used up (0-100).
+/// Bar colour for a share of a limit that is used up (0-100):
+/// blue while there's room, orange when it's getting close, red near the end.
 func usageTint(_ percent: Int) -> Color {
-    // TODO(human)
-    return .accentColor
+    switch percent {
+    case ..<70: return .blue
+    case ..<90: return .orange
+    default: return .red
+    }
+}
+
+/// Time left until `date`, short: "45min", "1hr 20min", "2d 5hr".
+/// Rounds up, so it never says "0min" while the limit is still on.
+func countdownText(to date: Date, now: Date = Date()) -> String {
+    let minutes = Int((date.timeIntervalSince(now) / 60).rounded(.up))
+    if minutes < 1 { return "<1min" }
+    let days = minutes / 1440, hours = minutes % 1440 / 60, mins = minutes % 60
+    if days > 0 { return hours > 0 ? "\(days)d \(hours)hr" : "\(days)d" }
+    if hours > 0 { return mins > 0 ? "\(hours)hr \(mins)min" : "\(hours)hr" }
+    return "\(mins)min"
+}
+
+/// Lock icon and time until the account can be used again, shown next to the
+/// name while a limit is at 100%.
+struct LimitLock: View {
+    let usage: Usage
+    let active: Bool    // false for a stopped account: grey, like its bars
+
+    private var whichLimit: String {
+        switch (usage.fiveHour >= 100, usage.week >= 100) {
+        case (true, true): return "5-hour and weekly limits reached"
+        case (true, false): return "5-hour limit reached"
+        default: return "Weekly limit reached"
+        }
+    }
+
+    var body: some View {
+        // Redraws itself, so the countdown moves even between live refreshes.
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            HStack(spacing: 3) {
+                Image(systemName: "lock.fill").font(.system(size: 10, weight: .semibold))
+                if let until = usage.unlocksAt {
+                    Text(countdownText(to: until, now: context.date))
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                }
+            }
+            .foregroundStyle(active ? usageTint(100) : Color.secondary)
+            .fixedSize()
+            .help(usage.unlocksAt.map { until in
+                let when = Calendar.current.isDateInToday(until)
+                    ? until.formatted(date: .omitted, time: .shortened)
+                    : until.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+                return "\(whichLimit) · resets \(when)"
+            } ?? "\(whichLimit) · reset time unknown")
+        }
+    }
 }
 
 struct PopoverView: View {
@@ -458,6 +523,9 @@ struct AccountRow: View {
                         .help(profile.title)     // the full address on hover
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1).truncationMode(.middle)
+                    if let usage = profile.usage, usage.isLocked, profile.isSignedIn {
+                        LimitLock(usage: usage, active: lit)
+                    }
                     Spacer(minLength: 4)
                     if opening {
                         Text("Opening…").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -1167,14 +1235,20 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLi
     store.reload()
     if CommandLine.arguments.contains("--demo") {
         // Example accounts for screenshots, so nobody's real addresses get published.
-        func demo(_ email: String, _ fiveHour: Int, _ week: Int, running: Bool) -> Profile {
+        func demo(_ email: String, _ fiveHour: Int, _ week: Int, running: Bool,
+                  resetsIn: TimeInterval = 3 * 3600) -> Profile {
             Profile(name: email, dataDir: "", account: email,
-                    usage: Usage(fiveHour: fiveHour, week: week, updated: Date(), isLive: true),
+                    usage: Usage(fiveHour: fiveHour, week: week, updated: Date(),
+                                 fiveHourResets: Date().addingTimeInterval(resetsIn + 30),
+                                 weekResets: Date().addingTimeInterval(4 * 86400), isLive: true),
                     app: running ? NSRunningApplication.current : nil)
         }
-        store.profiles = [demo("personal@example.com", 34, 61, running: true),
-                          demo("work@example.com", 8, 22, running: true),
+        store.profiles = [demo("personal@example.com", 100, 61, running: true, resetsIn: 80 * 60),
+                          demo("work@example.com", 8, 78, running: true),
                           demo("side-project@example.com", 0, 87, running: false)]
+        if CommandLine.arguments.contains("--locked-stopped") {
+            store.profiles[2] = demo("side-project@example.com", 45, 100, running: false)
+        }
         store.syncTime = "18:06"
         if CommandLine.arguments.contains("--opening") { store.opening = ["side-project@example.com"] }
     }

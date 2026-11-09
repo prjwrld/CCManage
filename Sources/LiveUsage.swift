@@ -187,7 +187,10 @@ func fetchLiveUsage(dataDir: String) async throws -> Usage {
         guard let value = json[name] else { return nil }
         guard let w = value as? [String: Any] else { return (0, nil) }
         let used = (w["utilization"] as? NSNumber)?.doubleValue ?? 0
-        return (Int(used.rounded()), parseDate(w["resets_at"] as? String))
+        // 99.6 would round to 100 and read as "used up" without the lock that
+        // goes with it, so only a limit that really is full shows 100.
+        let percent = used >= 100 ? Int(used.rounded()) : min(Int(used.rounded()), 99)
+        return (percent, parseDate(w["resets_at"] as? String))
     }
     let fiveHour = window("five_hour")
     let week = window("seven_day")
