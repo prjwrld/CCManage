@@ -20,7 +20,7 @@ let mainDataDir = home + "/Library/Application Support/Claude"
 let syncLogPath = home + "/.claude/logs/claude-sessions-sync.log"
 let claudeBundleID = "com.anthropic.claudefordesktop"
 let claudeAppPath = "/Applications/Claude.app"
-let appRepoURL = URL(string: "https://github.com/prjwrld/accounts-for-claude")!
+let appRepoURL = URL(string: "https://github.com/prjwrld/CCManage")!
 /// The command-line tool this app drives (by Emin Budak, MIT).
 let cliRepoURL = URL(string: "https://github.com/EminBudak/claude-multi-account#quick-start")!
 /// UserDefaults key: true once "Don't ask again" was ticked on the Quit question.

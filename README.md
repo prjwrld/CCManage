@@ -27,7 +27,7 @@ macOS 14.4+ · Apple silicon and Intel · Swift / SwiftUI · MIT · **unofficial
    cd claude-multi-account && ./install.sh
    claude-multi setup you@example.com you@work.example.com
    ```
-2. Download **AccountsForClaude-x.y.z.dmg** from [Releases](https://github.com/prjwrld/accounts-for-claude/releases), open it, and drag **Accounts for Claude** into Applications.
+2. Download **AccountsForClaude-x.y.z.dmg** from [Releases](https://github.com/prjwrld/CCManage/releases), open it, and drag **Accounts for Claude** into Applications.
 3. Open it. Look for the Claude logo in the menu bar. To start it automatically, use ⋯ → **Open at Login**.
 
 The app is signed with a Developer ID and notarized by Apple, so it opens without Gatekeeper warnings.
@@ -49,8 +49,8 @@ The menu bar icon is Claude's own logo, loaded at runtime from your installed Cl
 ## Build from source
 
 ```bash
-git clone https://github.com/prjwrld/accounts-for-claude.git
-cd accounts-for-claude
+git clone https://github.com/prjwrld/CCManage.git
+cd CCManage
 scripts/build.sh install      # builds, copies to /Applications and opens it
 ```
 
