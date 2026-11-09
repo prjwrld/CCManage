@@ -353,6 +353,25 @@ func countdownText(to date: Date, now: Date = Date()) -> String {
     return "\(mins)min"
 }
 
+/// Time until the 5-hour limit starts over, shown next to the name while the
+/// card is hovered. A locked card shows LimitLock instead.
+struct ResetHint: View {
+    let resets: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            HStack(spacing: 3) {
+                Image(systemName: "clock.arrow.circlepath").font(.system(size: 10, weight: .medium))
+                Text(countdownText(to: resets, now: context.date))
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+            }
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .help("5-hour limit resets at \(resets.formatted(date: .omitted, time: .shortened))")
+        }
+    }
+}
+
 /// Lock icon and time until the account can be used again, shown next to the
 /// name while a limit is at 100%.
 struct LimitLock: View {
@@ -508,7 +527,8 @@ struct AccountRow: View {
     let opening: Bool     // asked to open, window not up yet
     let disabled: Bool
     let act: Actions
-    @State private var hovering = false
+    // --hover renders every card as hovered, for headless snapshots.
+    @State private var hovering = CommandLine.arguments.contains("--hover")
 
     /// Opening counts as "on" for colours, so the card lights up the moment
     /// it's clicked instead of staying grey until the window appears.
@@ -525,6 +545,10 @@ struct AccountRow: View {
                         .lineLimit(1).truncationMode(.middle)
                     if let usage = profile.usage, usage.isLocked, profile.isSignedIn {
                         LimitLock(usage: usage, active: lit)
+                    } else if hovering, profile.isRunning, !opening, profile.isSignedIn,
+                              let resets = profile.usage?.fiveHourResets, resets > Date() {
+                        ResetHint(resets: resets)
+                            .transition(.opacity)
                     }
                     Spacer(minLength: 4)
                     if opening {
